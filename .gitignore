@@ -1,0 +1,15 @@
+# Ambiente virtual
+venv/
+.env/
+
+# Arquivos gerados
+Relatorios/*.xlsx
+Relatorios/*.txt
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# Sistema
+.DS_Store
+Thumbs.db
