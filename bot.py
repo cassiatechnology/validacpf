@@ -5,23 +5,47 @@ from datetime import datetime
 import os
 import pyperclip
 import re
+import subprocess
 
 # ================= CONFIGURAÇÕES =================
 
 pyautogui.PAUSE = 0.4
 pyautogui.FAILSAFE = True
 
-URL_CONSULTA = "https://servicos.receita.fazenda.gov.br/Servicos/CPF/ConsultaSituacao/ConsultaPublica.asp"
+URL_CONSULTA = "https://servicos.receita.fazenda.gov.br/servicos/cpf/consultasituacao/consultapublica.asp"
 
 EXCEL_ORIGINAL = r"C:/dev/BotValidaCpfReceita_2/cpfDataNascimento.xlsx"
 PASTA_SAIDA = r"C:/dev/BotValidaCpfReceita_2/Relatorios"
 
 POSICAO_CONTEUDO = (500, 400)
 
-LIMITE_CONSULTAS = 400
-TEMPO_ESPERA_LOTE = 300  # 5 minutos
+INTERVALO_REINICIO = 5  # reinicia o chrome a cada 400 consultas
 
-# ================= FUNÇÕES =================
+# ================= NAVEGADOR =================
+
+def abrir_chrome():
+    chrome_path = os.environ.get("CHROME_PATH", "chrome")
+
+    subprocess.Popen([
+        chrome_path,
+        "--incognito",
+        "--start-maximized",
+        URL_CONSULTA
+    ])
+
+    time.sleep(8)
+
+
+def reiniciar_chrome():
+    subprocess.run(
+        ["taskkill", "/F", "/IM", "chrome.exe"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    time.sleep(3)
+    abrir_chrome()
+
 
 def reabrir_pagina_consulta():
     time.sleep(0.8)
@@ -37,6 +61,7 @@ def reabrir_pagina_consulta():
 
     time.sleep(3)
 
+# ================= EXTRAÇÃO =================
 
 def extrair_dados_texto(texto_pagina: str) -> dict:
     resultado = {
@@ -61,28 +86,20 @@ def extrair_dados_texto(texto_pagina: str) -> dict:
     return resultado
 
 
-def save_resultados(resultados, arquivo_txt, arquivo_excel):
+def save_resultados(resultados, arquivo_excel):
     if resultados:
         pd.DataFrame(resultados).to_excel(arquivo_excel, index=False)
-
-    print("\n📁 Resultados atualizados:")
-    print(f"TXT  → {arquivo_txt}")
-    print(f"XLSX → {arquivo_excel}")
-
 
 # ================= MAIN =================
 
 def main():
     print("=== INSTRUÇÕES IMPORTANTES ===")
-    print("1. Abra o navegador e acesse:")
-    print(f"   {URL_CONSULTA}")
-    print("2. MAXIMIZE o navegador")
-    print("3. Zoom 100%")
-    print("4. Cursor piscando no campo CPF")
-    print("5. NÃO use mouse/teclado durante execução")
+    print("NÃO use mouse ou teclado durante a execução")
     print("----------------------------------------")
 
-    input("Pressione ENTER para começar...")
+    input("Pressione ENTER para iniciar...")
+
+    abrir_chrome()
 
     try:
         df = pd.read_excel(EXCEL_ORIGINAL, dtype={'CPF': str, 'Data de Nascimento': str})
@@ -98,94 +115,78 @@ def main():
     df = df.dropna(how='all').reset_index(drop=True)
 
     data_hora = datetime.now().strftime("%Y%m%d_%H%M%S")
-    arquivo_txt = os.path.join(PASTA_SAIDA, f"Resultado_Consulta_CPF_{data_hora}.txt")
     arquivo_excel = os.path.join(PASTA_SAIDA, f"Resultado_Consulta_CPF_{data_hora}.xlsx")
 
     resultados = []
+    contador = 0
 
-    with open(arquivo_txt, 'w', encoding='utf-8') as log:
-        log.write("Linha | CPF | Data Nasc | Nome | Situação | Status | Observação\n")
-        log.write("-" * 100 + "\n")
+    for idx, row in df.iterrows():
+        contador += 1
 
-        for idx, row in df.iterrows():
-            cpf = str(row['CPF']).strip().zfill(11)
-            data_nasc = str(row['Data de Nascimento']).strip()
+        cpf = str(row['CPF']).strip().zfill(11)
+        data_nasc = str(row['Data de Nascimento']).strip()
 
-            if not cpf or not data_nasc:
-                continue
+        if not cpf or not data_nasc:
+            continue
 
-            print(f"\n🔎 {idx + 1}/{len(df)} | CPF: {cpf}")
+        print(f"\n🔎 {contador}/{len(df)} | CPF: {cpf}")
 
-            try:
-                pyautogui.hotkey('ctrl', 'a')
-                pyautogui.press('backspace')
-                pyautogui.write(cpf)
+        try:
+            pyautogui.hotkey('ctrl', 'a')
+            pyautogui.press('backspace')
+            pyautogui.write(cpf)
 
+            pyautogui.press('tab')
+
+            pyautogui.hotkey('ctrl', 'a')
+            pyautogui.press('backspace')
+            pyautogui.write(data_nasc)
+
+            pyautogui.press('tab')
+            pyautogui.press('space')
+
+            print("⏳ Resolva o captcha (3s)...")
+            time.sleep(3)
+
+            for _ in range(5):
                 pyautogui.press('tab')
 
-                pyautogui.hotkey('ctrl', 'a')
-                pyautogui.press('backspace')
-                pyautogui.write(data_nasc)
+            pyautogui.press('space')
+            time.sleep(3)
 
-                pyautogui.press('tab')
-                pyautogui.press('space')
+            pyautogui.click(POSICAO_CONTEUDO)
+            pyautogui.hotkey('ctrl', 'a')
+            pyautogui.hotkey('ctrl', 'c')
+            time.sleep(0.5)
 
-                print("⏳ Resolva o captcha (3s)...")
-                time.sleep(3)
+            texto = pyperclip.paste()
+            dados = extrair_dados_texto(texto)
 
-                for _ in range(5):
-                    pyautogui.press('tab')
+            resultados.append({
+                'CPF': cpf,
+                'Data de Nascimento': data_nasc,
+                'Nome': dados['nome'],
+                'Situação Cadastral': dados['situacao_cadastral'],
+                'Status': dados['status'],
+                'Observação': dados['mensagem']
+            })
 
-                pyautogui.press('space')
+            save_resultados(resultados, arquivo_excel)
 
-                time.sleep(3)
-
-                pyautogui.click(POSICAO_CONTEUDO)
-                pyautogui.hotkey('ctrl', 'a')
-                pyautogui.hotkey('ctrl', 'c')
-                time.sleep(0.5)
-
-                texto = pyperclip.paste()
-                dados = extrair_dados_texto(texto)
-
-                linha = (
-                    f"{idx + 1} | {cpf} | {data_nasc} | "
-                    f"{dados['nome']} | {dados['situacao_cadastral']} | "
-                    f"{dados['status']} | {dados['mensagem']}"
-                )
-
-                print(linha)
-                log.write(linha + "\n")
-
-                resultados.append({
-                    'CPF': cpf,
-                    'Data de Nascimento': data_nasc,
-                    'Nome': dados['nome'],
-                    'Situação Cadastral': dados['situacao_cadastral'],
-                    'Status': dados['status'],
-                    'Observação': dados['mensagem']
-                })
-
-                save_resultados(resultados, arquivo_txt, arquivo_excel)
-
-                # ⏸️ Pausa a cada 400 consultas
-                if (idx + 1) % LIMITE_CONSULTAS == 0:
-                    print(f"\n⏸️ {LIMITE_CONSULTAS} consultas realizadas.")
-                    print("⏳ Aguardando 5 minutos...")
-                    time.sleep(TEMPO_ESPERA_LOTE)
-                    print("▶️ Retomando consultas...")
-                    reabrir_pagina_consulta()
-                else:
-                    reabrir_pagina_consulta()
-
-            except KeyboardInterrupt:
-                print("\n⛔ Execução interrompida.")
-                break
-
-            except Exception as e:
-                print(f"Erro na linha {idx + 1}: {e}")
+            if contador % INTERVALO_REINICIO == 0:
+                print("♻️ Reiniciando Chrome...")
+                reiniciar_chrome()
+            else:
                 reabrir_pagina_consulta()
-                continue
+
+        except KeyboardInterrupt:
+            print("\n⛔ Execução interrompida.")
+            break
+
+        except Exception as e:
+            print(f"Erro na linha {contador}: {e}")
+            reabrir_pagina_consulta()
+            continue
 
     print("\n✅ Processo finalizado.")
 
