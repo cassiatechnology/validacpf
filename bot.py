@@ -6,6 +6,7 @@ import os
 import pyperclip
 import re
 import subprocess
+import random
 
 # ================= CONFIGURAÇÕES =================
 
@@ -19,7 +20,8 @@ PASTA_SAIDA = r"C:/dev/BotValidaCpfReceita_2/Relatorios"
 
 POSICAO_CONTEUDO = (500, 400)
 
-INTERVALO_REINICIO = 5  # reinicia o chrome a cada 400 consultas
+INTERVALO_REINICIO = 6   # reinicia o Chrome
+INTERVALO_MOUSE = 3       # move mouse sutilmente
 
 # ================= NAVEGADOR =================
 
@@ -61,6 +63,20 @@ def reabrir_pagina_consulta():
 
     time.sleep(3)
 
+# ================= HUMANIZAÇÃO =================
+
+def mover_mouse_sutil():
+    x, y = pyautogui.position()
+
+    desloc_x = random.randint(-8, 8)
+    desloc_y = random.randint(-8, 8)
+
+    pyautogui.moveTo(
+        x + desloc_x,
+        y + desloc_y,
+        duration=random.uniform(0.1, 0.25)
+    )
+
 # ================= EXTRAÇÃO =================
 
 def extrair_dados_texto(texto_pagina: str) -> dict:
@@ -94,18 +110,15 @@ def save_resultados(resultados, arquivo_excel):
 
 def main():
     print("=== INSTRUÇÕES IMPORTANTES ===")
-    print("NÃO use mouse ou teclado durante a execução")
+    print("• Não use mouse ou teclado durante a execução")
+    print("• O Chrome será aberto automaticamente")
     print("----------------------------------------")
 
     input("Pressione ENTER para iniciar...")
 
     abrir_chrome()
 
-    try:
-        df = pd.read_excel(EXCEL_ORIGINAL, dtype={'CPF': str, 'Data de Nascimento': str})
-    except Exception as e:
-        print("Erro ao ler Excel:", e)
-        return
+    df = pd.read_excel(EXCEL_ORIGINAL, dtype={'CPF': str, 'Data de Nascimento': str})
 
     df['Data de Nascimento'] = df['Data de Nascimento'].apply(
         lambda x: pd.to_datetime(x, errors='coerce').strftime('%d/%m/%Y')
@@ -129,9 +142,13 @@ def main():
         if not cpf or not data_nasc:
             continue
 
-        print(f"\n🔎 {contador}/{len(df)} | CPF: {cpf}")
+        print(f"🔎 {contador}/{len(df)} | CPF: {cpf}")
 
         try:
+            if contador % INTERVALO_MOUSE == 0:
+                print("🖱️ Movimento sutil do mouse")
+                mover_mouse_sutil()
+
             pyautogui.hotkey('ctrl', 'a')
             pyautogui.press('backspace')
             pyautogui.write(cpf)
@@ -145,7 +162,6 @@ def main():
             pyautogui.press('tab')
             pyautogui.press('space')
 
-            print("⏳ Resolva o captcha (3s)...")
             time.sleep(3)
 
             for _ in range(5):
@@ -174,21 +190,20 @@ def main():
             save_resultados(resultados, arquivo_excel)
 
             if contador % INTERVALO_REINICIO == 0:
-                print("♻️ Reiniciando Chrome...")
+                print("♻️ Reiniciando Chrome (modo anônimo)...")
                 reiniciar_chrome()
             else:
                 reabrir_pagina_consulta()
 
         except KeyboardInterrupt:
-            print("\n⛔ Execução interrompida.")
+            print("⛔ Execução interrompida pelo usuário.")
             break
 
         except Exception as e:
-            print(f"Erro na linha {contador}: {e}")
+            print(f"Erro: {e}")
             reabrir_pagina_consulta()
-            continue
 
-    print("\n✅ Processo finalizado.")
+    print("✅ Processo finalizado.")
 
 
 if __name__ == "__main__":
